@@ -1,0 +1,159 @@
+_schema-version: "3.1"
+ID: uni
+description: A simple CAP project.
+version: 1.0.0
+modules:
+  - name: uni-srv
+    type: nodejs
+    path: gen/srv
+    requires:
+      - name: uni-db
+      - name: uaa_uni
+      - name: TLP_Connectivity
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    parameters:
+      buildpack: nodejs_buildpack
+      readiness-health-check-http-endpoint: /health
+      readiness-health-check-type: http
+    build-parameters:
+      builder: npm
+  - name: uni-db-deployer
+    type: hdb
+    path: gen/db
+    requires:
+      - name: uni-db
+    parameters:
+      buildpack: nodejs_buildpack
+  - name: uni-app-content
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: uni-repo-host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - artifacts:
+            - dep.zip
+          name: dep
+          target-path: resources/
+        - artifacts:
+            - lec.zip
+          name: lec
+          target-path: resources/
+  - name: dep
+    type: html5
+    path: app/dep
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build:cf
+      supported-platforms:
+        []
+  - name: lec
+    type: html5
+    path: app/lec
+    build-parameters:
+      build-result: dist
+      builder: custom
+      commands:
+        - npm install
+        - npm run build:cf
+      supported-platforms:
+        []
+  - name: uni-destination-content
+    type: com.sap.application.content
+    requires:
+      - name: uni-destination-service
+        parameters:
+          content-target: true
+      - name: uni-repo-host
+        parameters:
+          service-key:
+            name: uni-repo-host-key
+      - name: uaa_uni
+        parameters:
+          service-key:
+            name: uaa_uni-key
+    parameters:
+      content:
+        instance:
+          destinations:
+            - Name: lecturerapp_uni_repo_host
+              ServiceInstanceName: uni-html5-srv
+              ServiceKeyName: uni-repo-host-key
+              sap.cloud.service: lecturerapp
+            - Authentication: OAuth2UserTokenExchange
+              Name: lecturerapp_uaa_uni
+              ServiceInstanceName: uni-xsuaa-service
+              ServiceKeyName: uaa_uni-key
+              sap.cloud.service: lecturerapp
+          existing_destinations_policy: ignore
+    build-parameters:
+      no-source: true
+resources:
+  - name: uni-db
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+  - name: TLP_Connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+     service: destination
+     service-plan: lite
+  - name: uni-repo-host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-name: uni-html5-srv
+      service-plan: app-host
+  - name: uni-destination-service
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        HTML5Runtime_enabled: true
+        init_data:
+          instance:
+            destinations:
+              - Authentication: NoAuthentication
+                Name: ui5
+                ProxyType: Internet
+                Type: HTTP
+                URL: https://ui5.sap.com
+              - Authentication: NoAuthentication
+                HTML5.DynamicDestination: true
+                HTML5.ForwardAuthToken: true
+                Name: uni-srv-api
+                ProxyType: Internet
+                Type: HTTP
+                URL: ~{srv-api/srv-url}
+            existing_destinations_policy: update
+        version: 1.0.0
+      service: destination
+      service-name: uni-destination-service
+      service-plan: lite
+    requires:
+      - name: srv-api
+  - name: uaa_uni
+    type: org.cloudfoundry.managed-service
+    parameters:
+      path: ./xs-security.json
+      service: xsuaa
+      service-name: uni-xsuaa-service
+      service-plan: application
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
